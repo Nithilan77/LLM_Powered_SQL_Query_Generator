@@ -93,9 +93,9 @@ def main():
 
     # A few sample questions to try. Edit / add your own.
     questions = [
-        "What are the top 5 product categories by total revenue?",
-        "Which 5 states have the most canceled orders?",
-        "What is the average review score?",
+        "What is the monthly revenue trend in 2018?",
+        "Which 5 sellers have the highest average review scores, with at least 50 reviews?",
+        "How many customers are repeat buyers versus one-time buyers?",
     ]
     for q in questions:
         answer(q, engine)
