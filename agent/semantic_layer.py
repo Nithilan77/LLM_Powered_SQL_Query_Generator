@@ -46,7 +46,7 @@ SEMANTIC_LAYER = {
             "user_id": "Per-ORDER customer key. Joins to fact_orders.user_id. NOT a stable person id.",
             "unique_id": "STABLE per-PERSON identifier. The SAME real customer shares one unique_id across all their orders. Use this (via COUNT(DISTINCT unique_id)) for repeat-buyer, retention, cohort, and unique-customer questions.",
             "city": "Customer city (lowercase).",
-            "state": "Customer state, 2-letter Brazilian code (e.g. 'SP', 'RJ', 'MG').",
+            "state": "CUSTOMER state, 2-letter Brazilian code (e.g. 'SP', 'RJ', 'MG'). This is the location an order COMES FROM. For questions about orders 'by state', 'from a state', or 'where orders/cancellations happen', use THIS column (the customer's state), NOT dim_sellers.seller_state.",
             "zip_code_prefix": "First digits of customer zip; joins to dim_geography.",
         },
     },
@@ -64,7 +64,7 @@ SEMANTIC_LAYER = {
         "columns": {
             "seller_id": "PK. Joins to fact_orders.seller_id.",
             "seller_city": "Seller city (lowercase).",
-            "seller_state": "Seller state, 2-letter code.",
+            "seller_state": "SELLER (merchant) state, 2-letter code. Use ONLY when the question is explicitly about the SELLER's location or seller-side metrics (e.g. freight by seller state). For customer-origin questions, use dim_users.state instead.",
         },
     },
     "dim_reviews": {

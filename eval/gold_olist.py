@@ -74,7 +74,7 @@ GOLD = [
     },
     {
         "id": "q06_repeat_buyers",
-        "question": "How many customers are repeat buyers (more than one order)?",
+        "question": "What is the total number of repeat-buyer customers, where a repeat buyer is a person who placed more than one order? Return a single count.",
         "gold_sql": (
             "SELECT COUNT(*) FROM ("
             "  SELECT u.unique_id FROM fact_orders f "
@@ -114,7 +114,7 @@ GOLD = [
     },
     {
         "id": "q09_avg_freight_by_state",
-        "question": "What is the average freight value per seller state, for the top 5 states by average freight?",
+        "question": "Across all orders (regardless of status), what is the average freight value per seller state? Return the top 5 states by average freight.",
         "gold_sql": (
             "SELECT s.seller_state, AVG(f.freight_value_usd) AS avg_freight "
             "FROM fact_orders f JOIN dim_sellers s ON f.seller_id = s.seller_id "
