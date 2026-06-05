@@ -53,6 +53,10 @@ class SchemaRetriever:
     retrieve(question, k) -> list of table names.
     """
 
+    # In a star schema the fact table is needed by nearly every query, so we
+    # pin it rather than relying on retrieval to surface it. RAG picks the dims.
+    ALWAYS_INCLUDE = ("fact_orders",)
+
     def __init__(self, embedder=None):
         self.embedder = embedder or _default_embedder()
         self.table_names = list(SEMANTIC_LAYER.keys())
@@ -61,22 +65,47 @@ class SchemaRetriever:
         self.matrix = self.embedder(descriptions)  # (n_tables, dim)
 
     def _table_text(self, table_name: str) -> str:
-        """The text we embed for a table: purpose + column names."""
+        """
+        The text we embed for a table. We include the purpose AND a
+        natural-language line about each column (not just column names),
+        so the description is richer and separates better in vector space.
+        Terse 'col1, col2, col3' lists embed too similarly across tables.
+        """
         entry = SEMANTIC_LAYER[table_name]
-        cols = ", ".join(entry["columns"].keys())
-        return f"{table_name}: {entry['description']} Columns: {cols}"
+        col_lines = "; ".join(
+            f"{col} ({desc.split('.')[0]})" for col, desc in entry["columns"].items()
+        )
+        return f"{table_name}. {entry['description']} Relevant fields: {col_lines}"
 
     def retrieve(self, question: str, k: int = 3):
-        """Return the k table names most relevant to the question."""
+        """
+        Return the table names most relevant to the question.
+
+        STAR-SCHEMA DESIGN CHOICE: fact_orders is the central fact table that
+        almost every analytical query needs (all revenue, orders, status, and
+        the FKs live there). Rather than gamble on retrieval surfacing it, we
+        ALWAYS include it and use RAG to pick the relevant DIMENSIONS around it.
+        This is why a star schema is RAG-friendly: pin the fact, retrieve dims.
+        """
         q_vec = self.embedder([question])[0]
-        idx, sims = _cosine_top_k(q_vec, self.matrix, k)
-        return [self.table_names[i] for i in idx]
+        idx, sims = _cosine_top_k(q_vec, self.matrix, len(self.table_names))
+        ranked = [self.table_names[i] for i in idx]
+
+        result = list(self.ALWAYS_INCLUDE)
+        for t in ranked:
+            if t not in result:
+                result.append(t)
+            if len(result) >= k:
+                break
+        return result[:k]
 
     def retrieve_with_scores(self, question: str, k: int = 3):
         """Same, but also return the similarity score (useful for debugging)."""
         q_vec = self.embedder([question])[0]
-        idx, sims = _cosine_top_k(q_vec, self.matrix, k)
-        return [(self.table_names[i], float(sims[i])) for i in idx]
+        idx, sims = _cosine_top_k(q_vec, self.matrix, len(self.table_names))
+        score_map = {self.table_names[i]: float(sims[i]) for i in idx}
+        tables = self.retrieve(question, k)
+        return [(t, score_map[t]) for t in tables]
 
     def render_retrieved(self, question: str, k: int = 3) -> str:
         """Render the FULL semantic descriptions of just the retrieved tables."""

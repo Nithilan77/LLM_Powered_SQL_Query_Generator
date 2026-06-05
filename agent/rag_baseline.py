@@ -82,7 +82,7 @@ def main():
         "Which 5 sellers have the highest average review scores, with at least 50 reviews?",
     ]
     for q in questions:
-        answer(q, engine, retriever, k=3)
+        answer(q, engine, retriever, k=4)
         print("=" * 60)
 
 
