@@ -72,7 +72,16 @@ def evaluate(chain, engine, limit=None, fresh=False):
             continue  # resume: skip already-evaluated questions
 
         # 1. system prediction (this spends an API call, maybe two if it repairs)
-        res = chain.run(item["question"])
+        try:
+            res = chain.run(item["question"])
+        except Exception as e:
+            # Quota exhausted or other fatal LLM error. Stop cleanly WITHOUT
+            # crashing: the checkpoint keeps everything done so far, so a
+            # re-run tomorrow (after quota resets) resumes from here.
+            msg = str(e).splitlines()[0]
+            print(f"\n!! Stopping early: {msg}")
+            print(f"   Progress saved. {len(done)} done. Re-run to resume after quota resets.")
+            break
 
         # 2. gold reference result
         gold_rows = run_gold(engine, item["gold_sql"])
