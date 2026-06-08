@@ -48,7 +48,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 from llm import generate_sql as real_generate_sql  # noqa: E402
 from retriever import SchemaRetriever                # noqa: E402
 
-DB_PATH = os.environ.get("OLIST_DB", os.path.join("..", "data", "olist.db"))
+DB_PATH = os.environ.get(
+    "OLIST_DB",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "olist.db"),
+)
 MAX_REPAIRS = 2
 RESULT_ROW_LIMIT = 1000  # safety cap injected if the query has no LIMIT
 
