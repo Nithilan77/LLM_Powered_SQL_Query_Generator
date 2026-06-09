@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 from sqlalchemy import create_engine, text
 
@@ -60,16 +61,23 @@ def run_gold(engine, gold_sql):
         return conn.execute(text(gold_sql)).fetchall()
 
 
-def evaluate(chain, engine, limit=None, fresh=False):
+def evaluate(chain, engine, limit=None, fresh=False, delay=7.0):
     if fresh and os.path.exists(CHECKPOINT):
         os.remove(CHECKPOINT)
 
     done = load_done()
     items = GOLD[:limit] if limit else GOLD
 
+    first = True
     for item in items:
         if item["id"] in done:
             continue  # resume: skip already-evaluated questions
+
+        # Pace requests to respect the free-tier per-minute limit (10/min).
+        # Sleep BEFORE each call except the first.
+        if not first:
+            time.sleep(delay)
+        first = False
 
         # 1. system prediction (this spends an API call, maybe two if it repairs)
         try:
@@ -155,6 +163,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fresh", action="store_true", help="ignore checkpoint, start over")
     ap.add_argument("--limit", type=int, default=None, help="only first N questions")
+    ap.add_argument("--delay", type=float, default=7.0, help="seconds between questions (rate-limit pacing)")
     args = ap.parse_args()
 
     from sql_chain import SqlChain
@@ -163,7 +172,7 @@ def main():
     print("Loading system (retriever + chain)...")
     chain = SqlChain(engine=engine)
 
-    results = evaluate(chain, engine, limit=args.limit, fresh=args.fresh)
+    results = evaluate(chain, engine, limit=args.limit, fresh=args.fresh, delay=args.delay)
     report(results)
 
 
