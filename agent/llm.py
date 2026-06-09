@@ -87,8 +87,14 @@ def generate_sql(prompt: str, temperature: float = 0.0) -> str:
                 config=config,
             )
             return _strip_sql_fences(resp.text)
-        except Exception as e:  # noqa: BLE001  (we genuinely want to catch+retry all)
+        except Exception as e:  # noqa: BLE001
             last_err = e
+            # Quota errors (429 / RESOURCE_EXHAUSTED) are NOT transient within
+            # this run -- retrying just wastes attempts and time. Fail fast so
+            # the caller (eval runner) can stop cleanly and resume later.
+            msg = str(e)
+            if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                raise RuntimeError(f"Gemini quota exhausted: {msg.splitlines()[0]}")
             wait = 2 ** attempt  # 1s, 2s, 4s, 8s
             print(f"  [llm] attempt {attempt + 1} failed ({e}); retrying in {wait}s")
             time.sleep(wait)
