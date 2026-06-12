@@ -91,6 +91,13 @@ column should be used. Follow the guidance carefully (grain: count DISTINCT
 order_id for orders; revenue = SUM(order_total_usd); person identity = unique_id,
 not user_id).
 
+Output rules:
+- When the question asks for a ranking, "top N", "most", "highest", "lowest",
+  or "which X by Y", SELECT BOTH the grouping label AND the metric you ORDER BY
+  (e.g. SELECT state, COUNT(...) -- not just state).
+- When the question asks "how many" as a single total, return ONE scalar value
+  (wrap grouped logic in an outer COUNT/aggregate); do not return one row per group.
+
 {schema_text}
 
 Question: "{question}"
