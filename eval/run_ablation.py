@@ -23,6 +23,7 @@ Run:  python run_ablation.py
 import argparse
 import json
 import os
+import random
 import sys
 import time
 
@@ -67,7 +68,7 @@ def run_gold(engine, sql):
         return conn.execute(text(sql)).fetchall()
 
 
-def run_config(config, engine, delay):
+def run_config(config, engine, delay, items):
     from sql_chain import SqlChain
     from retriever import SchemaRetriever
 
@@ -78,7 +79,7 @@ def run_config(config, engine, delay):
 
     done = load_done(config)
     first = True
-    for item in GOLD:
+    for item in items:
         if item["id"] in done:
             continue
         if not first:
@@ -103,7 +104,7 @@ def run_config(config, engine, delay):
         done[item["id"]] = rec
         print(f"  {'OK' if strict else 'XX'} [{item['id']}] {item['difficulty']}"
               + (" (repaired)" if res.repaired else ""))
-    return [done[i["id"]] for i in GOLD if i["id"] in done]
+    return [done[i["id"]] for i in items if i["id"] in done]
 
 
 def summarize(config, results):
@@ -118,19 +119,29 @@ def summarize(config, results):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--configs", nargs="+", default=list(CONFIGS.keys()),
-                    help="which configs to run")
+    ap.add_argument("--configs", nargs="+", default=["full", "no_semantic", "bare"],
+                    help="which configs to run (default: the semantic-layer comparison)")
     ap.add_argument("--delay", type=float, default=2.0, help="seconds between questions")
+    ap.add_argument("--subset", type=int, default=None,
+                    help="run a fixed random N-question subset (deterministic, seed=42)")
     ap.add_argument("--fresh", action="store_true", help="delete checkpoints and restart")
     args = ap.parse_args()
 
     engine = create_engine(f"sqlite:///{DB_PATH}")
 
+    # Deterministic subset: same questions for every config.
+    items = list(GOLD)
+    if args.subset:
+        rng = random.Random(42)
+        items = rng.sample(items, min(args.subset, len(items)))
+        items.sort(key=lambda x: x["id"])  # stable order
+        print(f"Using fixed {len(items)}-question subset (seed=42).")
+
     summaries = []
     for config in args.configs:
         if args.fresh and os.path.exists(ckpt_path(config)):
             os.remove(ckpt_path(config))
-        results = run_config(config, engine, args.delay)
+        results = run_config(config, engine, args.delay, items)
         s = summarize(config, results)
         if s:
             summaries.append(s)

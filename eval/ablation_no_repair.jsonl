@@ -31,3 +31,10 @@
 {"id": "q31_cancel_rate", "difficulty": "hard", "correct": false, "correct_tolerant": false, "repaired": false, "attempts": 1, "success": true}
 {"id": "q32_max_monthly_revenue", "difficulty": "hard", "correct": false, "correct_tolerant": true, "repaired": false, "attempts": 1, "success": true}
 {"id": "q33_category_with_most_sellers", "difficulty": "hard", "correct": true, "correct_tolerant": true, "repaired": false, "attempts": 1, "success": true}
+{"id": "q34_state_highest_avg_review", "difficulty": "hard", "correct": false, "correct_tolerant": false, "repaired": false, "attempts": 1, "success": false}
+{"id": "q35_freight_pct_revenue", "difficulty": "hard", "correct": true, "correct_tolerant": true, "repaired": false, "attempts": 1, "success": true}
+{"id": "q36_yearly_revenue", "difficulty": "medium", "correct": true, "correct_tolerant": true, "repaired": false, "attempts": 1, "success": true}
+{"id": "q37_single_order_customers", "difficulty": "hard", "correct": false, "correct_tolerant": false, "repaired": false, "attempts": 1, "success": false}
+{"id": "q38_top_category_by_volume", "difficulty": "medium", "correct": false, "correct_tolerant": false, "repaired": false, "attempts": 1, "success": true}
+{"id": "q39_boleto_share", "difficulty": "hard", "correct": false, "correct_tolerant": false, "repaired": false, "attempts": 1, "success": true}
+{"id": "q40_avg_score_by_payment", "difficulty": "hard", "correct": false, "correct_tolerant": false, "repaired": false, "attempts": 1, "success": true}
