@@ -6,3 +6,4 @@ __pycache__/
 frontend/node_modules/
 eval/*.jsonl
 .pytest_cache/
+STUDY_GUIDE.docx
