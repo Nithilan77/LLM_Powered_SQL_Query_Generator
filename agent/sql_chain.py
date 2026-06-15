@@ -140,12 +140,44 @@ class SqlChain:
         llm: Optional[Callable[[str], str]] = None,
         k: int = 4,
         max_repairs: int = MAX_REPAIRS,
+        use_semantic_layer: bool = True,
+        use_rag: bool = True,
     ):
         self.engine = engine or create_engine(f"sqlite:///{DB_PATH}")
         self.retriever = retriever if retriever is not None else SchemaRetriever()
         self.llm = llm or real_generate_sql
         self.k = k
         self.max_repairs = max_repairs
+        # Ablation switches (all True = full system).
+        self.use_semantic_layer = use_semantic_layer
+        self.use_rag = use_rag
+
+    def _schema_for(self, question: str):
+        """
+        Build the (tables_used, schema_text) for the prompt according to the
+        ablation switches:
+          - use_rag=False        -> include ALL tables (no retrieval)
+          - use_semantic_layer=F -> bare column names only (no descriptions)
+        """
+        from semantic_layer import SEMANTIC_LAYER
+
+        all_tables = list(SEMANTIC_LAYER.keys())
+        if self.use_rag:
+            tables = self.retriever.retrieve(question, k=self.k)
+        else:
+            tables = all_tables
+
+        if self.use_semantic_layer:
+            from semantic_layer import render_table
+            schema_text = "\n\n".join(render_table(t) for t in tables)
+        else:
+            # bare schema: table + column names only, no business descriptions
+            lines = []
+            for t in tables:
+                cols = ", ".join(SEMANTIC_LAYER[t]["columns"].keys())
+                lines.append(f"TABLE {t}: {cols}")
+            schema_text = "\n".join(lines)
+        return tables, schema_text
 
     def _execute(self, sql: str):
         """Run SQL. Returns (columns, rows). Raises on DB error."""
@@ -160,9 +192,8 @@ class SqlChain:
         start = time.time()
         res = QueryResult(question=question)
 
-        # --- retrieve relevant tables (RAG) ---
-        res.tables_used = self.retriever.retrieve(question, k=self.k)
-        schema_text = self.retriever.render_retrieved(question, k=self.k)
+        # --- retrieve relevant tables (RAG) / build schema per ablation flags ---
+        res.tables_used, schema_text = self._schema_for(question)
 
         # --- first generation attempt ---
         sql = self.llm(_build_initial_prompt(schema_text, question))
