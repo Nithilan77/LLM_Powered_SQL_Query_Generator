@@ -31,8 +31,8 @@ from sqlalchemy import create_engine, text
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "agent"))
 
-from gold_olist import GOLD            # noqa: E402
-from comparator import results_match   # noqa: E402
+from gold_olist import GOLD                       # noqa: E402
+from comparator import results_match, subset_match  # noqa: E402
 
 DB_PATH = os.environ.get("OLIST_DB", os.path.join("..", "data", "olist.db"))
 CHECKPOINT = os.path.join(os.path.dirname(__file__), "eval_checkpoint.jsonl")
@@ -94,19 +94,20 @@ def evaluate(chain, engine, limit=None, fresh=False, delay=7.0):
         # 2. gold reference result
         gold_rows = run_gold(engine, item["gold_sql"])
 
-        # 3. compare
+        # 3. compare -- record BOTH strict and shape-tolerant correctness
         if res.success:
-            correct = results_match(
-                res.rows, gold_rows, order_matters=item["order_matters"]
-            )
+            strict = results_match(res.rows, gold_rows, order_matters=item["order_matters"])
+            tolerant = subset_match(res.rows, gold_rows, order_matters=item["order_matters"])
         else:
-            correct = False  # a prediction that errored is incorrect
+            strict = tolerant = False
+        correct = strict  # primary metric stays strict
 
         record = {
             "id": item["id"],
             "difficulty": item["difficulty"],
             "question": item["question"],
             "correct": bool(correct),
+            "correct_tolerant": bool(tolerant),
             "pred_success": bool(res.success),
             "repaired": bool(res.repaired),
             "attempts": res.attempts,
@@ -133,12 +134,14 @@ def report(results):
         print("No results.")
         return
     correct = sum(r["correct"] for r in results)
+    tolerant = sum(r.get("correct_tolerant", r["correct"]) for r in results)
     repaired = sum(r["repaired"] for r in results)
     repaired_and_correct = sum(r["repaired"] and r["correct"] for r in results)
     avg_latency = sum(r["latency_ms"] for r in results) / n
 
     print("\n" + "=" * 60)
-    print(f"EXECUTION ACCURACY: {correct}/{n} = {100*correct/n:.1f}%")
+    print(f"EXECUTION ACCURACY (strict):          {correct}/{n} = {100*correct/n:.1f}%")
+    print(f"EXECUTION ACCURACY (shape-tolerant):  {tolerant}/{n} = {100*tolerant/n:.1f}%")
     print(f"Average latency: {avg_latency:.0f} ms")
     print(f"Self-correction fired on {repaired}/{n} queries; "
           f"{repaired_and_correct} of those ended correct")

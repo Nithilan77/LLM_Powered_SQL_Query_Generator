@@ -56,6 +56,65 @@ def results_match(
     return Counter(pred) == Counter(gold)
 
 
+def _columns_of(rows):
+    """Transpose rows -> list of column tuples. [] if no rows."""
+    if not rows:
+        return []
+    return list(zip(*rows))
+
+
+def subset_match(pred_rows, gold_rows, order_matters=False, float_tol=2) -> bool:
+    """
+    FAIR leniency for output-shape differences.
+
+    A prediction is correct if, for EVERY column in the gold result, there is a
+    matching column in the prediction with the same values in the same row
+    alignment. This accepts:
+      - prediction has EXTRA columns gold doesn't (e.g. label + metric when gold
+        is label-only, or vice versa), as long as gold's columns are all present.
+    It does NOT accept:
+      - missing gold values, wrong values, wrong row counts, or wrong ordering
+        (when order_matters).
+
+    This is stricter than "any overlap": ALL gold columns must be reproduced
+    exactly. It only forgives the SHAPE (extra/positional columns), never the data.
+    """
+    # exact match always wins first
+    if results_match(pred_rows, gold_rows, order_matters, float_tol):
+        return True
+
+    pred = _normalize_rows(pred_rows, float_tol)
+    gold = _normalize_rows(gold_rows, float_tol)
+
+    if len(pred) != len(gold):
+        return False  # different number of rows -> not the same answer
+    if not gold:
+        return len(pred) == 0
+
+    pred_cols = _columns_of(pred)
+    gold_cols = _columns_of(gold)
+
+    # Every gold column must appear (with identical values, same row order if
+    # order_matters) as some prediction column.
+    used = set()
+    for gcol in gold_cols:
+        found = False
+        for i, pcol in enumerate(pred_cols):
+            if i in used:
+                continue
+            if order_matters:
+                ok = list(pcol) == list(gcol)
+            else:
+                ok = Counter(pcol) == Counter(gcol)
+            if ok:
+                used.add(i)
+                found = True
+                break
+        if not found:
+            return False
+    return True
+
+
 def compare_sql(engine, pred_sql: str, gold_rows, order_matters=False, float_tol=2):
     """
     Execute pred_sql and compare to precomputed gold_rows.
