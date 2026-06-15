@@ -1,1 +1,8 @@
 .env
+data/olist.db
+data/olist/
+__pycache__/
+*.pyc
+frontend/node_modules/
+eval/*.jsonl
+.pytest_cache/
