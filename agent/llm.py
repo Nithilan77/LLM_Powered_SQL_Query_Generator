@@ -1,109 +1,126 @@
 """
-llm.py  --  The ONLY file that knows we're using Gemini.
+llm.py  --  Provider-agnostic SQL generation. Supports Groq and Gemini.
 
-Everything else in the project calls generate_sql(prompt) and gets back a
-SQL string. If we ever switch to OpenAI/Claude, we only change THIS file.
+The ONLY file that knows which LLM provider we use. Everything else calls
+generate_sql(prompt) and gets back a SQL string.
 
-Why this matters:
-  - One place to swap providers (good engineering, good interview answer).
-  - Free-tier Gemini has tight rate limits, so retry/backoff lives here
-    instead of being scattered across the codebase.
+Pick the provider with LLM_PROVIDER in your .env:
+    LLM_PROVIDER=groq     (default; uses GROQ_API_KEY)
+    LLM_PROVIDER=gemini   (uses GEMINI_API_KEY)
+
+Why this design:
+  - One place to swap providers (a real interview talking point).
+  - Groq's free tier (30 RPM / 14,400 RPD) makes the full eval + ablation
+    feasible, where Gemini's 20/day did not.
+  - Groq is OpenAI-API-compatible, so we use the openai SDK pointed at Groq.
 """
 
 import os
 import re
 import time
 
-from google import genai
-from google.genai import types
 from dotenv import load_dotenv
 
-load_dotenv()  # reads GEMINI_API_KEY from a .env file in the project root
+load_dotenv()
 
-# --- config --------------------------------------------------------------
-# Flash-Lite for cheap dev iteration (15 RPM, 1000/day free).
-# Switch to "gemini-2.5-flash" for your final, higher-quality eval run.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+PROVIDER = os.environ.get("LLM_PROVIDER", "groq").lower()
 MAX_RETRIES = 4
-# -------------------------------------------------------------------------
+
+# Model per provider (override with LLM_MODEL if you want).
+_DEFAULT_MODELS = {
+    "groq": "llama-3.3-70b-versatile",
+    "gemini": "gemini-2.5-flash-lite",
+}
+MODEL = os.environ.get("LLM_MODEL", _DEFAULT_MODELS.get(PROVIDER, "llama-3.3-70b-versatile"))
+
+_SYSTEM = (
+    "You are an expert data analyst who writes correct, efficient SQLite SQL. "
+    "Return ONLY the SQL query, no explanation, no markdown fences."
+)
 
 _client = None
 
 
 def _get_client():
-    """Create the Gemini client once and reuse it."""
     global _client
-    if _client is None:
-        api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY not set. Put it in a .env file:\n"
-                "  GEMINI_API_KEY=your_key_here"
-            )
-        _client = genai.Client(api_key=api_key)
+    if _client is not None:
+        return _client
+
+    if PROVIDER == "groq":
+        from openai import OpenAI
+        key = os.environ.get("GROQ_API_KEY")
+        if not key:
+            raise RuntimeError("GROQ_API_KEY not set in .env")
+        _client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
+    elif PROVIDER == "gemini":
+        from google import genai
+        key = os.environ.get("GEMINI_API_KEY")
+        if not key:
+            raise RuntimeError("GEMINI_API_KEY not set in .env")
+        _client = genai.Client(api_key=key)
+    else:
+        raise RuntimeError(f"Unknown LLM_PROVIDER: {PROVIDER}")
     return _client
 
 
 def _strip_sql_fences(text: str) -> str:
-    """
-    LLMs love wrapping SQL in ```sql ... ``` markdown fences, and sometimes
-    add a 'Here is your query:' preamble. We strip all that so we get raw,
-    runnable SQL.
-    """
     text = text.strip()
-    # Remove ```sql ... ``` or ``` ... ``` fences
     fence = re.search(r"```(?:sql)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
     if fence:
         text = fence.group(1)
     return text.strip().rstrip(";").strip()
 
 
-def generate_sql(prompt: str, temperature: float = 0.0) -> str:
-    """
-    Send a prompt to Gemini and return cleaned SQL.
+def _is_quota_error(msg: str) -> bool:
+    msg = msg.lower()
+    return "429" in msg or "resource_exhausted" in msg or "rate limit" in msg or "quota" in msg
 
-    temperature=0.0 -> deterministic. We want the SAME SQL for the same
-    question every time; no creative variation when generating queries.
 
-    Retries with exponential backoff on rate-limit / transient errors,
-    because the free tier WILL throttle us during eval runs.
-    """
+def _call_groq(prompt: str, temperature: float) -> str:
     client = _get_client()
-    config = types.GenerateContentConfig(
+    resp = client.chat.completions.create(
+        model=MODEL,
         temperature=temperature,
-        system_instruction=(
-            "You are an expert data analyst who writes correct, efficient "
-            "SQLite SQL. Return ONLY the SQL query, no explanation, no "
-            "markdown fences."
-        ),
+        messages=[
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
     )
+    return resp.choices[0].message.content
+
+
+def _call_gemini(prompt: str, temperature: float) -> str:
+    from google.genai import types
+    client = _get_client()
+    config = types.GenerateContentConfig(temperature=temperature, system_instruction=_SYSTEM)
+    resp = client.models.generate_content(model=MODEL, contents=prompt, config=config)
+    return resp.text
+
+
+def generate_sql(prompt: str, temperature: float = 0.0) -> str:
+    """Send a prompt to the configured provider; return cleaned SQL.
+
+    Deterministic (temperature=0). Retries transient errors with backoff;
+    fails fast on quota/rate-limit errors so the eval runner can stop cleanly.
+    """
+    call = _call_groq if PROVIDER == "groq" else _call_gemini
 
     last_err = None
     for attempt in range(MAX_RETRIES):
         try:
-            resp = client.models.generate_content(
-                model=MODEL,
-                contents=prompt,
-                config=config,
-            )
-            return _strip_sql_fences(resp.text)
+            return _strip_sql_fences(call(prompt, temperature))
         except Exception as e:  # noqa: BLE001
             last_err = e
-            # Quota errors (429 / RESOURCE_EXHAUSTED) are NOT transient within
-            # this run -- retrying just wastes attempts and time. Fail fast so
-            # the caller (eval runner) can stop cleanly and resume later.
             msg = str(e)
-            if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                raise RuntimeError(f"Gemini quota exhausted: {msg.splitlines()[0]}")
-            wait = 2 ** attempt  # 1s, 2s, 4s, 8s
+            if _is_quota_error(msg):
+                raise RuntimeError(f"{PROVIDER} quota/rate limit hit: {msg.splitlines()[0]}")
+            wait = 2 ** attempt
             print(f"  [llm] attempt {attempt + 1} failed ({e}); retrying in {wait}s")
             time.sleep(wait)
 
-    raise RuntimeError(f"Gemini failed after {MAX_RETRIES} attempts: {last_err}")
+    raise RuntimeError(f"{PROVIDER} failed after {MAX_RETRIES} attempts: {last_err}")
 
 
 if __name__ == "__main__":
-    # Smoke test: does the wrapper talk to Gemini at all?
-    print("Model:", MODEL)
-    sql = generate_sql("Write SQL to select all rows from a table named foo.")
-    print("Got SQL:\n", sql)
+    print(f"Provider: {PROVIDER} | Model: {MODEL}")
+    print(generate_sql("Write SQL to select all rows from a table named foo."))
